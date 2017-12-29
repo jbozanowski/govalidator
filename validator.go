@@ -960,6 +960,33 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 		return false, customTypeErrors
 	}
 
+	for validatorName, customErrorMessage := range options {
+		for key, value := range ParamTagRegexMap {
+			validator := validatorName
+
+			ps := value.FindStringSubmatch(validator)
+			if len(ps) == 0 {
+				continue
+			}
+
+			if validatefunc, ok := CustomTypeParamTagMap.Get(key); ok {
+				delete(options, validator)
+
+				if result := validatefunc(v.Interface(), o.Interface(), ps[1:]...); !result {
+					if len(customErrorMessage) > 0 {
+						customTypeErrors = append(customTypeErrors, Error{Name: t.Name, Err: fmt.Errorf(customErrorMessage), CustomErrorMessageExists: true, Validator: stripParams(validator)})
+						continue
+					}
+					customTypeErrors = append(customTypeErrors, Error{Name: t.Name, Err: fmt.Errorf("%s does not validate as %s", fmt.Sprint(v), validator), CustomErrorMessageExists: false, Validator: stripParams(validator)})
+				}
+			}
+		}
+	}
+
+	if len(customTypeErrors.Errors()) > 0 {
+		return false, customTypeErrors
+	}
+
 	if isRootType {
 		// Ensure that we've checked the value by all specified validators before report that the value is valid
 		defer func() {
@@ -1003,27 +1030,25 @@ func typeCheck(v reflect.Value, t reflect.StructField, o reflect.Value, options 
 				}
 
 				validatefunc, ok := ParamTagMap[key]
-				if !ok {
-					continue
-				}
+				if ok {
+					delete(options, validatorSpec)
 
-				delete(options, validatorSpec)
-
-				switch v.Kind() {
-				case reflect.String:
-					field := fmt.Sprint(v) // make value into string, then validate with regex
-					if result := validatefunc(field, ps[1:]...); (!result && !negate) || (result && negate) {
-						if customMsgExists {
-							return false, Error{t.Name, fmt.Errorf(customErrorMessage), customMsgExists, stripParams(validatorSpec)}
+					switch v.Kind() {
+					case reflect.String:
+						field := fmt.Sprint(v) // make value into string, then validate with regex
+						if result := validatefunc(field, ps[1:]...); (!result && !negate) || (result && negate) {
+							if customMsgExists {
+								return false, Error{t.Name, fmt.Errorf(customErrorMessage), customMsgExists, stripParams(validatorSpec)}
+							}
+							if negate {
+								return false, Error{t.Name, fmt.Errorf("%s does validate as %s", field, validator), customMsgExists, stripParams(validatorSpec)}
+							}
+							return false, Error{t.Name, fmt.Errorf("%s does not validate as %s", field, validator), customMsgExists, stripParams(validatorSpec)}
 						}
-						if negate {
-							return false, Error{t.Name, fmt.Errorf("%s does validate as %s", field, validator), customMsgExists, stripParams(validatorSpec)}
-						}
-						return false, Error{t.Name, fmt.Errorf("%s does not validate as %s", field, validator), customMsgExists, stripParams(validatorSpec)}
+					default:
+						// type not yet supported, fail
+						return false, Error{t.Name, fmt.Errorf("Validator %s doesn't support kind %s", validator, v.Kind()), false, stripParams(validatorSpec)}
 					}
-				default:
-					// type not yet supported, fail
-					return false, Error{t.Name, fmt.Errorf("Validator %s doesn't support kind %s", validator, v.Kind()), false, stripParams(validatorSpec)}
 				}
 			}
 

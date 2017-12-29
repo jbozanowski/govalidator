@@ -17,6 +17,9 @@ type CustomTypeValidator func(i interface{}, o interface{}) bool
 type ParamValidator func(str string, params ...string) bool
 type tagOptionsMap map[string]string
 
+// CustomTypeParamValidator is a wrapper for validator functions that both accept any type and additional parameters.
+type CustomTypeParamValidator func(i interface{}, o interface{}, params ...string) bool
+
 // UnsupportedTypeError is a wrapper for reflect.Type
 type UnsupportedTypeError struct {
 	Type reflect.Type
@@ -71,6 +74,31 @@ func (tm *customTypeTagMap) Set(name string, ctv CustomTypeValidator) {
 // Use this to validate compound or custom types that need to be handled as a whole, e.g.
 // `type UUID [16]byte` (this would be handled as an array of bytes).
 var CustomTypeTagMap = &customTypeTagMap{validators: make(map[string]CustomTypeValidator)}
+
+type customTypeParamTagMap struct {
+	validators map[string]CustomTypeParamValidator
+
+	sync.RWMutex
+}
+
+func (tm *customTypeParamTagMap) Get(name string) (CustomTypeParamValidator, bool) {
+	tm.RLock()
+	defer tm.RUnlock()
+	v, ok := tm.validators[name]
+	return v, ok
+}
+
+func (tm *customTypeParamTagMap) Set(name string, ctv CustomTypeParamValidator) {
+	tm.Lock()
+	defer tm.Unlock()
+	tm.validators[name] = ctv
+}
+
+// CustomTypeParamTagMap is a map of functions that can be used as tags for ValidateStruct function.
+// Use this to validate compound or custom types that need to be handled as a whole, e.g.
+// `type UUID [16]byte` (this would be handled as an array of bytes).
+// This map is for validators that support additional parameters.
+var CustomTypeParamTagMap = &customTypeParamTagMap{validators: make(map[string]CustomTypeParamValidator)}
 
 // TagMap is a map of functions, that can be used as tags for ValidateStruct function.
 var TagMap = map[string]Validator{
